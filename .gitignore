@@ -5,3 +5,5 @@
 
 # ignore excel's stupid files when it opens a spreadsheet
 data/~$*
+
+.DS_Store
