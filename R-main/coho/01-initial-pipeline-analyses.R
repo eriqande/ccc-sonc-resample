@@ -57,4 +57,11 @@ system(paste("cd slg_pipe/arena;",
 
 
 
+# after that, we can launch the colony runs.  Note that I typically just do this on the 
+# unix command line...
+message("Launching colony runs")
+system("cd slg_pipe/arena/COHO_FIRST_RUN/ColonyArea/; ./script/RunAllColony.sh  Colony-Run-1   0  20  &")
+system("cd slg_pipe/arena/COHO_FIRST_RUN/ColonyArea/; ./script/RunAllColony.sh  Permed-Run-1   1  20  &")
+
+
 
