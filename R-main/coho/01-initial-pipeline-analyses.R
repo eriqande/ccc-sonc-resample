@@ -65,3 +65,13 @@ system("cd slg_pipe/arena/COHO_FIRST_RUN/ColonyArea/; ./script/RunAllColony.sh  
 
 
 
+#### Then we can do the sibyanking procedure
+source("slg_pipe/R/slg_pipe_r_funcs.R")
+yank_sibs(genos = file.path(INP, "coho-first-run-genos.txt"),
+          CollDir = "slg_pipe/arena/COHO_FIRST_RUN/ColonyArea/Collections",
+          Run = "Colony-Run-1",
+          the_pops = file.path(INP, "coho-first-run-pops.txt"),
+          Cutoff = 3,
+          Num = 5,
+          OutDir = "."
+          )
