@@ -5,6 +5,11 @@
 # This script should be run at the top level of the ccc-sonc-resample respository (the 
 # directory in which ccc-sonc-resample.Rproj lives.)
 
+# NOTE! YOU CAN'T REALLY RUN THIS ALL STRAIGHT THROUGH IN R BECAUSE A LOT OF THE SYSTEM
+# CALLS ARE RUN AS BACKGROUND JOBS.  I JUST PUT THOSE IN AS SYSTEM CALLS BUT I MOSTLY
+# JUST PASTE THEM INTO THE COMMAND LINE AND LET THEM RUN.  OTHERWISE THINGS WON'T BE DONE
+# WHEN R TRIES TO MOVE ON TO THE NEXT ITEM.
+
 
 library(readxl)
 library(dplyr)
@@ -67,11 +72,22 @@ system("cd slg_pipe/arena/COHO_FIRST_RUN/ColonyArea/; ./script/RunAllColony.sh  
 
 #### Then we can do the sibyanking procedure
 source("slg_pipe/R/slg_pipe_r_funcs.R")
-yank_sibs(genos = file.path(INP, "coho-first-run-genos.txt"),
+sibyankout <- "slg_pipe/arena/COHO_FIRST_RUN/ColonyArea/Colony-Run-1-SibYankedDataSets"
+dir.create(sibyankout)
+set.seed(555)  # set this here for reproducibility
+yanked_sibs_list <- yank_sibs(genos = file.path(INP, "coho-first-run-genos.txt"),
           CollDir = "slg_pipe/arena/COHO_FIRST_RUN/ColonyArea/Collections",
           Run = "Colony-Run-1",
           the_pops = file.path(INP, "coho-first-run-pops.txt"),
           Cutoff = 3,
-          Num = 5,
-          OutDir = "."
+          Num = 4,
+          OutDir = sibyankout
           )
+
+
+#### And here we prep the 4 sib-yanked data sets for 2 runs of structure, each, at K = 2,...,10
+system("cd slg_pipe/arena/COHO_FIRST_RUN/; export SLG_PATH=../..; ../../script/Prepare_StructureArea.sh ../../../inputs/coho-structure-setup-input.sh ColonyArea/Colony-Run-1-SibYankedDataSets/*.txt ")
+
+
+#### Then launch those structure runs on 20 processors
+system("cd slg_pipe/arena/COHO_FIRST_RUN/StructureArea/arena; nohup ../script/ExecuteStructureRuns.sh  20  > BIG_LOG.txt  2>&1 &")
