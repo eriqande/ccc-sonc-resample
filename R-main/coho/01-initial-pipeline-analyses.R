@@ -13,6 +13,7 @@
 
 library(readxl)
 library(dplyr)
+library(stringr)
 source("R/ccc-sonc-functions.R")
 
 
@@ -84,6 +85,7 @@ yanked_sibs_list <- yank_sibs(genos = file.path(INP, "coho-first-run-genos.txt")
           OutDir = sibyankout
           )
 
+saveRDS(yanked_sibs_list, file = "slg_pipe/arena/COHO_FIRST_RUN/ColonyArea/Colony-Run-1-yanked-sibs-list.rds", compress = "xz")
 
 #### And here we prep the 4 sib-yanked data sets for 2 runs of structure, each, at K = 2,...,10
 system("cd slg_pipe/arena/COHO_FIRST_RUN/; export SLG_PATH=../..; ../../script/Prepare_StructureArea.sh ../../../inputs/coho-structure-setup-input.sh ColonyArea/Colony-Run-1-SibYankedDataSets/*.txt ")
@@ -91,3 +93,7 @@ system("cd slg_pipe/arena/COHO_FIRST_RUN/; export SLG_PATH=../..; ../../script/P
 
 #### Then launch those structure runs on 20 processors
 system("cd slg_pipe/arena/COHO_FIRST_RUN/StructureArea/arena; nohup ../script/ExecuteStructureRuns.sh  20  > BIG_LOG.txt  2>&1 &")
+
+
+#### Once they are done, we clump and distruct them
+system("cd slg_pipe/arena/COHO_FIRST_RUN/StructureArea/clump_and_distruct; ./script/ClumpAndDistructAll.sh 6")
