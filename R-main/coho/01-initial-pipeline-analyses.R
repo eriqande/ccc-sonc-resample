@@ -97,3 +97,7 @@ system("cd slg_pipe/arena/COHO_FIRST_RUN/StructureArea/arena; nohup ../script/Ex
 
 #### Once they are done, we clump and distruct them
 system("cd slg_pipe/arena/COHO_FIRST_RUN/StructureArea/clump_and_distruct; ./script/ClumpAndDistructAll.sh 6")
+
+#### Then Latex that stuff.  This creates a file: slg_pipe/arena/COHO_FIRST_RUN/StructureArea/clump_and_distruct/coho_struct.pdf
+# Must have a TeX installation.
+system("cd slg_pipe/arena/COHO_FIRST_RUN/StructureArea/clump_and_distruct; ./script/LaTeXify.sh -b ./final_pdf \"2 3 4 5 6 7 8 9 10\" > coho_struct.tex; pdflatex coho_struct.tex; pdflatex coho_struct.tex;")
