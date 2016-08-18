@@ -1,5 +1,5 @@
 
-
+#### SLG PIPE DOWNLOADING ####
 #' download the slg_pipe repo and binaries and install it
 #' 
 #' Just a convenience function that wraps up a few different commands.  If the directory
@@ -52,6 +52,9 @@ get_slg_pipe <- function(DIR = ".",
 }
 
 
+
+
+#### EFFECTIVE SAMPLE SIZES ####
 #' drop genes down a pedigree into sibling groups and return an effective sample size
 #' 
 #' This just assumes an allele freq of p and gives the parents genotypes
@@ -123,6 +126,10 @@ read_best_config <- function(path) {
 
 
 
+
+
+#### CREATING CONE INPUT FILES ####
+
 #' Read the alle_freqs from an slg_pipe run and return them in long format
 #' @param path the path that the alle_freq file is found at.  For example
 #' "slg_pipe/arena/COHO_FIRST_RUN/alle_freqs.txt"
@@ -139,8 +146,114 @@ get_alle_freqs_from_slg_pipe <- function(path) {
     mutate(alle1 = as.numeric(alle1),
            alle2 = as.numeric(alle2)) %>%
     tidyr::gather(., key = "allele", value = "freq", alle1, alle2) %>%
-    select(Collection, Locus, allele, freq) %>%
-    arrange(Collection, Locus, allele)
+    mutate(Pop = str_sub(Collection, 1, 3),
+           Year = str_sub(Collection, 4, 4)) %>%
+    select(Pop, Year, Collection, Locus, allele, freq) %>%
+    arrange(Pop, Locus, Year, Collection, allele)
+
+}
+
+
+
+#' given a data frame D with the eff_counts_str (and freqs), group it by pop and for each one, write
+#' out a CoNe input file.
+write_cone_eff_count_files <- function(D, pathprefix = "tmp") {
+  # first, toss loci that are monomorphic within populations
+  tossers <- D %>% 
+    group_by(Pop, Locus, allele) %>%
+    summarise(allesum = sum(freq)) %>%
+    group_by(Pop, Locus) %>%
+    summarise(tossit = any(allesum < 0.000001)) %>% # this is testing for any freqs equal to zero
+    filter(tossit == TRUE) %>%
+    select(Pop, Locus)
   
+  keepers <- ungroup(D) %>%
+    anti_join(., tossers) %>%
+    arrange(Pop, Locus, Year) %>%
+    select(Pop, Year, Locus, allele, eff_counts_str) %>%
+    tidyr::spread(., allele, value = eff_counts_str) %>%
+    arrange(Pop, Locus, Year)
+  
+  keep_split <- split(keepers, keepers$Pop)
+  
+  # then just lapply over these to write the CoNe files:
+  lapply(keep_split, function(x) {
+    file <- file.path(pathprefix, paste(x$Pop[1], ".txt", sep = ""))
+    cat(c("0", "2", nrow(x) / 2), sep = "\n", file = file)
+    cat("\n\n", file = file, append = TRUE)
+    tmp <- cbind(c(2, ""), x$alle1, x$alle2)
+    write.table(tmp, row.names = FALSE, col.names = FALSE, file = file, append = TRUE, quote = FALSE)
+    NULL
+  })
+}
+
+
+#### FOR RUNNING CONE AND SLURPING BACK THE OUTPUT ####
+
+
+#' Do a CoNe run and store the stdout in a file, then pull out what we want and return it
+#' 
+#' It will do this run in the CoNe_area/arena and should
+#' be called from the top directory of the repository.
+#' @param pop  The name of the CoNe file (without the .txt extension).  
+#' @param path The directory in which to the pop.txt file exists and in which you want to run CoNe.
+runCoNe <- function(pop, path = "CoNe_area/arena") {
+  
+    inf <- paste(pop, ".txt", sep = "")
+    outf <- paste(pop, "_cone.out", sep = "")
+    
+    system(paste("cd ", path, ";"   " ../bin/CoNe -f ", pop, ".txt", p, " -p ../probs/ -T 4 -m 10 -n 2 5000 1 > ", outf, sep = ""))
+    
+    # now slurp those data in
+    x <- readLines(file.path("CoNe_area/arena", outf))
+    
+    if(length(x) >  12) {
+      tmp <- x[str_detect(x, "^NE_LOGLIKE")] %>%
+        str_split_fixed(., "  *", 9) 
+      tmp <- tmp[, 3:5]
+      
+      header <- tmp[1,]
+      
+      tmp <- tmp[-1,]
+      mode(tmp) <- "numeric"
+      
+      # get the logl curve
+      logl <- as.data.frame(tmp) %>%
+        setNames(header) %>%
+        tbl_df()
+      
+      # now pick out the max and the support limits
+      tmp <- x[str_detect(x, "MaxByParabolicInterp|LowerSupportLimit|UpperSupportLimit")] %>%
+        str_split_fixed(., "  *", 7)
+      
+      max_etc <- data_frame(MLE = as.numeric(tmp[1,3]),
+                            LowerSuppLim = as.numeric(tmp[2,3]),
+                            UpperSuppLim = as.numeric(tmp[3,3]))
+      
+      ret <- list(logl = logl, max_etc = max_etc)
+    } else {
+      ret <- NULL
+    }
+    ret
+  })
+  
+  if(all(sapply(results, is.null))) {
+    ret <- NULL
+  } else {
+    # now, bung them into a few data frames
+    Logls <- lapply(results, function(x) x$logl) %>%
+      bind_rows(.id = "parent_n_factor") %>%
+      mutate(pop = pop) %>%
+      select(pop, everything())
+    
+    mles <- lapply(results, function(x) x$max_etc) %>%
+      bind_rows(.id = "parent_n_factor") %>%
+      mutate(pop = pop) %>%
+      mutate(UpperSuppLim = ifelse(UpperSuppLim == -999.9990, Inf, UpperSuppLim)) %>%
+      select(pop, everything())
+    
+    ret <- list(logl = Logls, mle = mles)
+  }
+  ret
   
 }
