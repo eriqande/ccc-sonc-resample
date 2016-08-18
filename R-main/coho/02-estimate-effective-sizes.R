@@ -51,12 +51,28 @@ AFreqs2 <- anti_join(AFreqs, toss_pops)
 
 # at the end of that, eff_counts_str is what we are going to want to print out
 # into the CoNe file.
-write_cone_eff_count_files(AFreqs2)
+write_cone_eff_count_files(AFreqs2, pathprefix = "CoNe_area/arena")
 
 
-# now, we 
+# now, we run all those pops through CoNe...
+pops <- sort(unique(AFreqs2$Pop))
+names(pops) <- pops
+CoNe_results_list <- lapply(pops, function(x) runCoNe(x))
 
-# from this long format it should not be too hard to attach
-# the effective sample size, and then write out the CoNe files.
-# note that the first sample can be reals and the second sample will
-# have to be rounded.
+# now, find those that we drop because their sample sizes were too small:
+drop_pops <- names(CoNe_results_list)[sapply(CoNe_results_list, is.null)]
+
+results <- CoNe_results_list[!(names(CoNe_results_list) %in% drop_pops)]
+
+# now, bung them into a few data frames
+Ne_Logls <- lapply(results, function(x) x$logl) %>%
+  bind_rows(.id = "parent_n_factor") %>%
+  mutate(pop = pop) %>%
+  select(pop, everything())
+
+Ne_mles <- lapply(results, function(x) x$max_etc) %>%
+  bind_rows(.id = "parent_n_factor") %>%
+  mutate(pop = pop) %>%
+  mutate(UpperSuppLim = ifelse(UpperSuppLim == -999.9990, Inf, UpperSuppLim)) %>%
+  select(pop, everything())
+
