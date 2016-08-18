@@ -36,7 +36,8 @@ AFreqs <- get_alle_freqs_from_slg_pipe(path = "slg_pipe/arena/COHO_FIRST_RUN/all
          eff_counts_even = ifelse(Year == "b" & eff_sum %% 2 == 1, 
                                   eff_counts + rmultinom(1, 1, prob = eff_counts)[,1],  # we always add one to make it even.  Otherwise we get loci in which the sample size goes to zero.
                                   eff_counts)) %>%
-  mutate(eff_counts_str = ifelse(Year == "a", sprintf("%02f", eff_counts_even), sprintf("%d", as.integer(eff_counts_even))))
+  mutate(eff_counts_str = ifelse(Year == "a", sprintf("%02f", eff_counts_even), sprintf("%d", as.integer(eff_counts_even)))) %>%
+  ungroup()
 
 
 # we need to toss those populations that don't have two samples
@@ -49,9 +50,26 @@ toss_pops <- AFreqs %>%
 
 AFreqs2 <- anti_join(AFreqs, toss_pops)
 
+# now, we need to drop loci that have 0 (less than or equal to 1) gene copies  sampled in any time
+# period in a population
+toss_pop_loci <- AFreqs2 %>%
+  filter(eff_sum < 1) %>%
+  group_by(Pop, Locus) %>% 
+  tally() %>%
+  select(Pop, Locus)
+
+AFreqs3 <- anti_join(AFreqs2, toss_pop_loci)
+
+
+
 # at the end of that, eff_counts_str is what we are going to want to print out
 # into the CoNe file.
-write_cone_eff_count_files(AFreqs2, pathprefix = "CoNe_area/arena")
+
+# now remove any existing CoNe input files and write new ones
+# then for reproducibility, set a seed (not really necessary cuz they are biallelic markers....)
+system("cd CoNe_area/arena; rm *.txt *.out;  echo 12345 678910 > cone_seeds")
+
+write_cone_eff_count_files(AFreqs3, pathprefix = "CoNe_area/arena")
 
 
 # now, we run all those pops through CoNe...
@@ -66,13 +84,14 @@ results <- CoNe_results_list[!(names(CoNe_results_list) %in% drop_pops)]
 
 # now, bung them into a few data frames
 Ne_Logls <- lapply(results, function(x) x$logl) %>%
-  bind_rows(.id = "parent_n_factor") %>%
-  mutate(pop = pop) %>%
+  bind_rows(.id = "pop") %>%
   select(pop, everything())
 
 Ne_mles <- lapply(results, function(x) x$max_etc) %>%
-  bind_rows(.id = "parent_n_factor") %>%
-  mutate(pop = pop) %>%
-  mutate(UpperSuppLim = ifelse(UpperSuppLim == -999.9990, Inf, UpperSuppLim)) %>%
-  select(pop, everything())
+  bind_rows(.id = "pop") %>%
+  mutate(LowerSuppLim = ifelse(LowerSuppLim == -999.9990, Inf, LowerSuppLim),
+         MLE = ifelse(MLE == -999.9990, Inf, MLE),
+         UpperSuppLim = ifelse(UpperSuppLim == -999.9990, Inf, UpperSuppLim)
+         ) %>%
+  select(pop, LowerSuppLim, MLE, UpperSuppLim)
 

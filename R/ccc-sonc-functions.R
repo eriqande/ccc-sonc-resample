@@ -195,65 +195,42 @@ write_cone_eff_count_files <- function(D, pathprefix = "tmp") {
 #' 
 #' It will do this run in the CoNe_area/arena and should
 #' be called from the top directory of the repository.
-#' @param pop  The name of the CoNe file (without the .txt extension).  
-#' @param path The directory in which to the pop.txt file exists and in which you want to run CoNe.
-runCoNe <- function(pop, path = "CoNe_area/arena") {
+#' @param pop  The name of the CoNe file (without the .txt extension) that lives in the CoNe_area/arena directory
+runCoNe <- function(pop) {
   
-    inf <- paste(pop, ".txt", sep = "")
-    outf <- paste(pop, "_cone.out", sep = "")
-    
-    system(paste("cd ", path, ";"   " ../bin/CoNe -f ", pop, ".txt", p, " -p ../probs/ -T 4 -m 10 -n 2 5000 1 > ", outf, sep = ""))
-    
-    # now slurp those data in
-    x <- readLines(file.path("CoNe_area/arena", outf))
-    
-    if(length(x) >  12) {
-      tmp <- x[str_detect(x, "^NE_LOGLIKE")] %>%
-        str_split_fixed(., "  *", 9) 
-      tmp <- tmp[, 3:5]
-      
-      header <- tmp[1,]
-      
-      tmp <- tmp[-1,]
-      mode(tmp) <- "numeric"
-      
-      # get the logl curve
-      logl <- as.data.frame(tmp) %>%
-        setNames(header) %>%
-        tbl_df()
-      
-      # now pick out the max and the support limits
-      tmp <- x[str_detect(x, "MaxByParabolicInterp|LowerSupportLimit|UpperSupportLimit")] %>%
-        str_split_fixed(., "  *", 7)
-      
-      max_etc <- data_frame(MLE = as.numeric(tmp[1,3]),
-                            LowerSuppLim = as.numeric(tmp[2,3]),
-                            UpperSuppLim = as.numeric(tmp[3,3]))
-      
-      ret <- list(logl = logl, max_etc = max_etc)
-    } else {
-      ret <- NULL
-    }
-    ret
-  })
+  outf <- paste(pop, "_cone.out", sep = "")
   
-  if(all(sapply(results, is.null))) {
-    ret <- NULL
+  system(paste("cd CoNe_area/arena;  ../bin/CoNe -f ", pop, ".txt  -p ../probs/ -T 4 -m 10 -n 2 5000 1 > ", outf, sep = ""))
+  
+  # now slurp those data in
+  x <- readLines(file.path("CoNe_area/arena", outf))
+  
+  if(length(x) >  12) {
+    tmp <- x[str_detect(x, "^NE_LOGLIKE")] %>%
+      str_split_fixed(., "  *", 9) 
+    tmp <- tmp[, 3:5]
+    
+    header <- tmp[1,]
+    
+    tmp <- tmp[-1,]
+    mode(tmp) <- "numeric"
+    
+    # get the logl curve
+    logl <- as.data.frame(tmp) %>%
+      setNames(header) %>%
+      tbl_df()
+    
+    # now pick out the max and the support limits
+    tmp <- x[str_detect(x, "MaxByParabolicInterp|LowerSupportLimit|UpperSupportLimit")] %>%
+      str_split_fixed(., "  *", 7)
+    
+    max_etc <- data_frame(MLE = as.numeric(tmp[1,3]),
+                          LowerSuppLim = as.numeric(tmp[2,3]),
+                          UpperSuppLim = as.numeric(tmp[3,3]))
+    
+    ret <- list(logl = logl, max_etc = max_etc)
   } else {
-    # now, bung them into a few data frames
-    Logls <- lapply(results, function(x) x$logl) %>%
-      bind_rows(.id = "parent_n_factor") %>%
-      mutate(pop = pop) %>%
-      select(pop, everything())
-    
-    mles <- lapply(results, function(x) x$max_etc) %>%
-      bind_rows(.id = "parent_n_factor") %>%
-      mutate(pop = pop) %>%
-      mutate(UpperSuppLim = ifelse(UpperSuppLim == -999.9990, Inf, UpperSuppLim)) %>%
-      select(pop, everything())
-    
-    ret <- list(logl = Logls, mle = mles)
+    ret <- NULL
   }
   ret
-  
 }
