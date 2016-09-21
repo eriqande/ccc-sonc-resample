@@ -66,10 +66,34 @@ get_slg_pipe <- function(DIR = ".",
 #' @param ped  a data frame that gives the pedigree
 #' @param reps the number of iterations to do for the Monte Carlo estimate
 #' @param p the initial freq (default = 0.5)
-sibgroup_eff_sample_size <- function(ped, reps, p = 0.5) {
+#' @param wts  a named vector (named by the individuals) of the unnormalized weights to use for each 
+#' individual in a weighted estimate (typically the BLUE).  By default let it be NULL
+#' @param force_unrelated logical flag.  If this is true, then each individual in the pedigree is
+#' simulated to be totally unrelated.  I am doing this so that I can simulate how much precision
+#' might be lost by using Colony to infer sibling groups in totally permuted data (which should be 
+#' equivalent to just drawing unrelated individuals).
+sibgroup_eff_sample_size <- function(ped, reps, p = 0.5, wts = NULL, force_unrelated = FALSE) {
+  
+  eff_num_gc_blue <- NA  # default return value
+  eff_num_gc <- NA
+  EffNumBluePred <- NA
+  
   
   if(nrow(ped) == 1) {
-    return(NA)
+    return(dplyr::data_frame(RawNumKids = nrow(ped), 
+                             NumMa = length(unique(ped$ma)),
+                             NumPa = length(unique(ped$pa)),
+                             EffNumKidsNaive = eff_num_gc / 2,
+                             EffNumKidsBlue = eff_num_gc_blue / 2,
+                             EffNumKidsBluePred = EffNumBluePred / 2))
+  }
+  NumMa <- length(unique(ped$ma))
+  NumPa <- length(unique(ped$pa))
+  
+  if(force_unrelated == TRUE) {  # in this case, we hack the simulation pedigree so that everyone has a different mother and father
+                                 # (I could simulate the kids directly, but this tweak requires changing everything else as little as possible.)
+    ped$pa <- paste("pa_", 1:nrow(ped), sep = "")
+    ped$ma <- paste("ma_", 1:nrow(ped), sep = "")
   }
   # get a vector of pa's and ma's
   Dads <- unique(ped$pa)
@@ -89,23 +113,44 @@ sibgroup_eff_sample_size <- function(ped, reps, p = 0.5) {
   gD <- gDad[ped$pa,]
   gM <- gMom[ped$ma,]
   
-  # now we segregate gametes from them
+  # now we segregate gametes from the dads
+  # Note that I have the "hD > 0.25 & hD < 0.75" in there cuz I am not sure about equality on numerics, so this is safer.
   hD <- gD/2
   hD[hD > 0.25 & hD < 0.75]  <- sample(0:1, size = sum(hD > 0.25 & hD < 0.75), replace = TRUE)
   
-  # now we segregate gametes from them
+  # now we segregate gametes from the moms  
   hM <- gM/2
   hM[hM > 0.25 & hM < 0.75]  <- sample(0:1, size = sum(hM > 0.25 & hM < 0.75), replace = TRUE)
   
   # now we make the kids by adding the haplotypes together
   gKids <- hD + hM
   
+  # this is the variance of the naive estimator
   TheVar <- mean(((colMeans(gKids) / 2) - p)^2)
   
+  # here we can figure out the variance of the BLUE estimator using the wts (which apply
+  # to each individual).
+  if(!is.null(wts)) {
+    # check to make sure that there is a weight for each kid
+    missed_kids <- setdiff(ped$kid, names(wts))
+    if(length(missed_kids) > 0) {
+      stop(length(missed_kids), " individuals in pedigree ped but not in wts: ", paste(missed_kids, collapse = ", "))
+    }
+    wtdKids <- gKids * ((wts[ped$kid]) / sum(wts[ped$kid]))
+    
+    WtdVar <- mean(((colSums(wtdKids) / 2) - p)^2)
+    eff_num_gc_blue <- p * (1 - p) / WtdVar  
+    EffNumBluePred = 2 * sum(wts[ped$kid])
+  }
   # this is the effective number of gene copies
   eff_num_gc <- p * (1 - p) / TheVar 
   
-  eff_num_gc
+  dplyr::data_frame(RawNumKids = nrow(ped), 
+                    NumMa = NumMa,
+                    NumPa = NumPa,
+                    EffNumKidsNaive = eff_num_gc / 2,
+                    EffNumKidsBlue = eff_num_gc_blue / 2,
+                    EffNumKidsBluePred = EffNumBluePred / 2)
 }
 
 

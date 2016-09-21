@@ -1,6 +1,8 @@
 library(readr)
 library(dplyr)
 library(stringr)
+library(afblue)
+library(ggplot2)
 
 source("R/ccc-sonc-functions.R")
 
@@ -16,13 +18,45 @@ source("R/ccc-sonc-functions.R")
 pops <- dir("slg_pipe/arena/COHO_FIRST_RUN/ColonyArea/Collections")
 paths <- dir("slg_pipe/arena/COHO_FIRST_RUN/ColonyArea/Collections", full.names = TRUE)
 names(paths) <- pops
-tmp <- sapply(paths, function(x) {
+#### First do the simulations as if the colony-inferred pedigree is the truth ####
+tmp <- lapply(paths, function(x) {
+  # do the straightforward and the BLUE estimator
   ped <- read_best_config(file.path(x, "Colony-Run-1", "output.BestConfig"))
-  sibgroup_eff_sample_size(ped, reps = 1000)
+  
+  bcped <- read_colony_best_config(path = file.path(x, "Colony-Run-1", "output.BestConfig"))
+  samples <- bcped$id[!is.na(bcped$dad)]
+  if(length(samples) > 1) {
+    L <- matrix_L_from_pedigree(bcped, samples)
+    weights <- weights_from_matrix_L(L)
+  } else {
+    weights <- NULL
+  }
+  
+  sibgroup_eff_sample_size(ped, reps = 1000, wts = weights)
 })
-eff_sizes <- data_frame(Collection = names(tmp), eff_num_gc = tmp)
+eff_sizes <- bind_rows(tmp, .id = "Collection")
 
+#### Then do the simulations assuming that every individual is totally unrelated, and colony inferred the pedigree from permuted data ####
+tmp <- lapply(paths, function(x) {
+  # do the straightforward and the BLUE estimator
+  ped <- read_best_config(file.path(x, "Permed-Run-1", "output.BestConfig"))
+  
+  bcped <- read_colony_best_config(path = file.path(x, "Permed-Run-1", "output.BestConfig"))
+  samples <- bcped$id[!is.na(bcped$dad)]
+  if(length(samples) > 1) {
+    L <- matrix_L_from_pedigree(bcped, samples)
+    weights <- weights_from_matrix_L(L)
+  } else {
+    weights <- NULL
+  }
+  
+  sibgroup_eff_sample_size(ped, reps = 1000, wts = weights, force_unrelated = TRUE)
+})
+eff_sizes_unrel <- bind_rows(tmp, .id = "Collection")
 
+names(eff_sizes_unrel)[-1] <- paste("perm-unrel-", names(eff_sizes_unrel)[-1], sep = "")
+
+inner_join(eff_sizes, eff_sizes_unrel)
 
 # now we are going to get the allele freqs, and add to them the effective sample sizes
 # and also the effective counts.  Note that for the first sample these can be real numbers
