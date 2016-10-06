@@ -13,7 +13,7 @@ source("R/ccc-sonc-functions.R")
 
 
 
-
+#### DO some stuff to assess the BLUE ####
 # compute effective sample sizes for Colony-Run-1
 pops <- dir("slg_pipe/arena/COHO_FIRST_RUN/ColonyArea/Collections")
 paths <- dir("slg_pipe/arena/COHO_FIRST_RUN/ColonyArea/Collections", full.names = TRUE)
@@ -32,7 +32,7 @@ tmp <- lapply(paths, function(x) {
     weights <- NULL
   }
   
-  sibgroup_eff_sample_size(ped, reps = 1000, wts = weights)
+  sibgroup_eff_sample_size(ped, reps = 10000, wts = weights)
 })
 eff_sizes <- bind_rows(tmp, .id = "Collection")
 
@@ -50,13 +50,17 @@ tmp <- lapply(paths, function(x) {
     weights <- NULL
   }
   
-  sibgroup_eff_sample_size(ped, reps = 1000, wts = weights, force_unrelated = TRUE)
+  sibgroup_eff_sample_size(ped, reps = 10000, wts = weights, force_unrelated = TRUE)
 })
 eff_sizes_unrel <- bind_rows(tmp, .id = "Collection")
 
 names(eff_sizes_unrel)[-1] <- paste("perm-unrel-", names(eff_sizes_unrel)[-1], sep = "")
 
-inner_join(eff_sizes, eff_sizes_unrel)
+full_blue_results <- inner_join(eff_sizes, eff_sizes_unrel)
+
+### we add an eff_num_gc (effective number of gene copies) column in eff_sizes. We use the Naive estimator for now...
+eff_sizes <- eff_sizes %>%
+  mutate(eff_num_gc = 2 * EffNumKidsNaive)
 
 # now we are going to get the allele freqs, and add to them the effective sample sizes
 # and also the effective counts.  Note that for the first sample these can be real numbers
@@ -103,7 +107,7 @@ AFreqs3 <- anti_join(AFreqs2, toss_pop_loci)
 # then for reproducibility, set a seed (not really necessary cuz they are biallelic markers....)
 system("cd CoNe_area/arena; rm *.txt *.out;  echo 12345 678910 > cone_seeds")
 
-write_cone_eff_count_files(AFreqs3, pathprefix = "CoNe_area/arena")
+dump <- write_cone_eff_count_files(AFreqs3, pathprefix = "CoNe_area/arena")
 
 
 # now, we run all those pops through CoNe...
@@ -129,3 +133,8 @@ Ne_mles <- lapply(results, function(x) x$max_etc) %>%
          ) %>%
   select(pop, LowerSuppLim, MLE, UpperSuppLim)
 
+
+#### Write out the results files to send to Libby and Carlos ####
+dir.create("outputs")
+write_csv(eff_sizes, path = "outputs/effective_sample_sizes.csv")
+write_csv(Ne_mles, path = "outputs/temporal_method_ne_estimates.csv")
