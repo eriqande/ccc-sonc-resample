@@ -27,8 +27,55 @@ dir.create(INP)
 
 #### Get the data prepared ####
 metageno <- read.csv("data/steelhead-meta-and-genos.csv.gz", stringsAsFactors = FALSE) %>%
-  tbl_df()
+  tbl_df() %>%
+  filter(!(str_detect(Duplicated_Sample_Flag, "omit")))
+  
 
+## Retain only the YOYs from 2001 ##
+# this involves filtering using stream-specific length criteria
+sz_grps <- suppressWarnings(prepare_sth_sizegrp_data())
+
+# the sz_grps file that brian gave me has some sort of redundant
+# columns.  We can get everything that we need from yoy_upper_mm and
+# one_plus_lower
+size_cats <- metageno %>%
+  select(STREAM_NUMBER_SPENCE, Pop_ID, Year, AGE, LENGTH) %>%
+  left_join(sz_grps %>% select(STREAM_NUMBER_SPENCE, yoy_upper_mm, one_plus_lower)) %>%
+  mutate(age_category = ifelse(Year != "A",
+                               ifelse(AGE == 0, "yoy", "one_plus"),
+                               ifelse(LENGTH <= yoy_upper_mm,
+                                      "yoy",
+                                      ifelse(LENGTH < one_plus_lower, "uncertain", "one_plus")
+                               )
+  )) %>%
+  mutate(age_category = factor(age_category, levels = c("yoy", "uncertain", "one_plus"))) # get em in the right order
+
+         
+# now, it turns out that CarRC, ElCrB, and NaInB all have nothing but yoy's (Brian checked this)
+# but they do not have an entry in the AGE column.  These are, in fact, the only fish from
+# years B or C that don't have age listed.  So, let's just change that.
+size_cats$age_category[size_cats$Year %in% c("B", "C") & is.na(size_cats$AGE)] <- "yoy"
+   
+size_cats %>% 
+  group_by(Year, age_category) %>%
+  tally()
+  
+# this lets us make a little thing that will show we have gotten the right number 
+# of different age categories
+compare_it <- size_cats %>%
+  filter(Year == "A") %>%
+  group_by(STREAM_NUMBER_SPENCE, Year, age_category) %>%
+  tally() %>%
+  ungroup() %>% 
+  tidyr::spread(data = ., key = age_category, value = n) %>%
+  left_join(sz_grps, .) %>%
+  mutate(yoy_inconsistency = YOY_cnt != yoy)
+
+write.csv(compare_it, "outputs/compare-age-category-nums.csv")
+
+### HAVE GOTTA PICK OUT THE YOY's and PROCEED NOW!!
+
+#####################################
 # be warned that there is a column at the end of all the genos giving the amount of 
 # missing data there.  That is easily removed below.
 
@@ -76,7 +123,7 @@ write.table(slg_genos, file = file.path(INP, "steelhead-first-run-genos.txt"),
             sep = "\t", row.names = FALSE, quote = FALSE)
             
 
-# grab the populations in the order that the appear in the summary file:
+# grab the populations in the order that they appear in the summary file:
 pops <- read.csv("data/steelhead-pops-summary-S-to-N.csv", stringsAsFactors = FALSE, skip = 1) %>%
   tbl_df() %>%
   select(Population.Code, Basin, Sampling.Location)
@@ -100,7 +147,7 @@ system(paste("cd slg_pipe/arena;",
              "steelhead-inputs/steelhead-first-run-pops.txt",
              "steelhead-inputs/steelhead-first-run-loci.txt",
              "STEELHEAD_FIRST_RUN",
-             "../../inputs/coho-first-pipe-run.sh | tee coho-inputs/STEELHEAD_FIRST_RUN-log.txt")
+             "../../inputs/coho-first-pipe-run.sh | tee steelhead-inputs/STEELHEAD_FIRST_RUN-log.txt")
 )
 
 
@@ -109,7 +156,9 @@ system(paste("cd slg_pipe/arena;",
 # unix command line...
 message("Launching colony runs")
 system("cd slg_pipe/arena/STEELHEAD_FIRST_RUN/ColonyArea; ./script/RunAllColony.sh  Colony-Run-1   0  20  &")
-system("cd slg_pipe/arena/STEELHEAD_FIRST_RUN/ColonyArea; ./script/RunAllColony.sh  Permed-Run-1   1  20  &")
+
+# I didn't do the following yet
+#system("cd slg_pipe/arena/STEELHEAD_FIRST_RUN/ColonyArea; ./script/RunAllColony.sh  Permed-Run-1   1  20  &")
 
 
 
@@ -117,12 +166,13 @@ system("cd slg_pipe/arena/STEELHEAD_FIRST_RUN/ColonyArea; ./script/RunAllColony.
 source("slg_pipe/R/slg_pipe_r_funcs.R")
 sibyankout <- "slg_pipe/arena/STEELHEAD_FIRST_RUN/ColonyArea/Colony-Run-1-SibYankedDataSets"
 dir.create(sibyankout)
-set.seed(555)  # set this here for reproducibility
+set.seed(444)  # set this here for reproducibility
 yanked_sibs_list <- yank_sibs(genos = file.path(INP, "steelhead-first-run-genos.txt"),
           CollDir = "slg_pipe/arena/STEELHEAD_FIRST_RUN/ColonyArea/Collections",
           Run = "Colony-Run-1",
           the_pops = file.path(INP, "steelhead-first-run-pops.txt"),
           Cutoff = 3,
+          num_kept = 2,
           Num = 4,
           OutDir = sibyankout
           )
@@ -140,6 +190,6 @@ system("cd slg_pipe/arena/STEELHEAD_FIRST_RUN/StructureArea/arena; nohup ../scri
 #### Once they are done, we clump and distruct them
 system("cd slg_pipe/arena/STEELHEAD_FIRST_RUN/StructureArea/clump_and_distruct; ./script/ClumpAndDistructAll.sh 6")
 
-#### Then Latex that stuff.  This creates a file: slg_pipe/arena/COHO_FIRST_RUN/StructureArea/clump_and_distruct/coho_struct.pdf
+#### Then Latex that stuff.  This creates a file: slg_pipe/arena/STEELHEAD_FIRST_RUN/StructureArea/clump_and_distruct/steelhead_struct.pdf
 # Must have a TeX installation.
 system("cd slg_pipe/arena/STEELHEAD_FIRST_RUN/StructureArea/clump_and_distruct; ./script/LaTeXify.sh -b ./final_pdf \"2 3 4 5 6 7 8 9 10\" > steelhead_struct.tex; pdflatex steelhead_struct.tex; pdflatex steelhead_struct.tex;")
