@@ -1,4 +1,18 @@
 
+#### Data prep stuff ####
+#' make Brian's size-group categories easily usable in R
+#' @param D path to csv file holding the size-group data
+prepare_sth_sizegrp_data <- function(D = "data/steelhead-2001-size-group-categories.csv") {
+  # read it and break the age_uncertain_range into two columns
+  sg <- read.csv(D, stringsAsFactors = FALSE, skip = 9, na.strings = "none") %>%
+    tbl_df() %>%
+    select(-(X:X.12)) %>%
+    tidyr::separate(age_uncertain_range, into = c("age_unc_low", "age_unc_hi"), sep = "-", convert = TRUE)  # the warnings here are fine
+  
+  sg
+  
+}
+
 #### SLG PIPE DOWNLOADING ####
 #' download the slg_pipe repo and binaries and install it
 #' 
@@ -200,6 +214,35 @@ get_alle_freqs_from_slg_pipe <- function(path) {
 
 
 
+
+#' Read the alle_freqs from an slg_pipe run and return them in long format
+#' 
+#' This version is specifically for the steelhead data
+#' @param path the path that the alle_freq file is found at.  For example
+#' "slg_pipe/arena/COHO_FIRST_RUN/alle_freqs.txt"
+get_steelhead_alle_freqs_from_slg_pipe <- function(path) {
+  af <- readLines(path)
+  af_long_mat <- paste(af[c(T,F)], af[c(F,T)], sep = "   ") %>%
+    str_split_fixed(., pattern = "[\\t ]+", n = 6)
+  
+  
+  af_long_mat[, c(2,3,4,5)] %>%
+    as.data.frame(stringsAsFactors = FALSE) %>%
+    setNames(c("Locus", "Collection", "alle1", "alle2")) %>%
+    tbl_df() %>%
+    mutate(alle1 = as.numeric(alle1),
+           alle2 = as.numeric(alle2)) %>%
+    tidyr::gather(., key = "allele", value = "freq", alle1, alle2) %>%
+    mutate(Pop = str_sub(Collection, 1, 4),
+           Year = str_sub(Collection, 5, 5)) %>%
+    select(Pop, Year, Collection, Locus, allele, freq) %>%
+    arrange(Pop, Locus, Year, Collection, allele)
+  
+}
+
+
+
+
 #' given a data frame D with the eff_counts_str (and freqs), group it by pop and for each one, write
 #' out a CoNe input file.
 write_cone_eff_count_files <- function(D, pathprefix = "tmp") {
@@ -241,14 +284,14 @@ write_cone_eff_count_files <- function(D, pathprefix = "tmp") {
 #' It will do this run in the CoNe_area/arena and should
 #' be called from the top directory of the repository.
 #' @param pop  The name of the CoNe file (without the .txt extension) that lives in the CoNe_area/arena directory
-runCoNe <- function(pop) {
+runCoNe <- function(pop, arena_path = "CoNe_area/arena") {
   
   outf <- paste(pop, "_cone.out", sep = "")
   
-  system(paste("cd CoNe_area/arena;  ../bin/CoNe -f ", pop, ".txt  -p ../probs/ -T 4 -m 10 -n 2 5000 1 > ", outf, sep = ""))
+  system(paste("cd ", arena_path, ";  ../bin/CoNe -f ", pop, ".txt  -p ../probs/ -T 4 -m 10 -n 2 5000 1 > ", outf, sep = ""))
   
   # now slurp those data in
-  x <- readLines(file.path("CoNe_area/arena", outf))
+  x <- readLines(file.path(arena_path, outf))
   
   if(length(x) >  12) {
     tmp <- x[str_detect(x, "^NE_LOGLIKE")] %>%
@@ -279,3 +322,6 @@ runCoNe <- function(pop) {
   }
   ret
 }
+
+
+
