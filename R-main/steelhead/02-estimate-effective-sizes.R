@@ -15,9 +15,10 @@ source("R/ccc-sonc-functions.R")
 
 #### DO some stuff to assess the BLUE ####
 # compute effective sample sizes for Colony-Run-1
-pops <- dir("slg_pipe/arena/COHO_FIRST_RUN/ColonyArea/Collections")
-paths <- dir("slg_pipe/arena/COHO_FIRST_RUN/ColonyArea/Collections", full.names = TRUE)
+pops <- dir("slg_pipe/arena/STEELHEAD_FIRST_RUN/ColonyArea/Collections")
+paths <- dir("slg_pipe/arena/STEELHEAD_FIRST_RUN/ColonyArea/Collections", full.names = TRUE)
 names(paths) <- pops
+
 #### First do the simulations as if the colony-inferred pedigree is the truth ####
 tmp <- lapply(paths, function(x) {
   # do the straightforward and the BLUE estimator
@@ -62,16 +63,18 @@ full_blue_results <- inner_join(eff_sizes, eff_sizes_unrel)
 eff_sizes <- eff_sizes %>%
   mutate(eff_num_gc = 2 * EffNumKidsNaive)
 
+
+
 # now we are going to get the allele freqs, and add to them the effective sample sizes
 # and also the effective counts.  Note that for the first sample these can be real numbers
 # but the for the second sample they have to be rounded and they must sum to an even number
 # (that is just how CoNe works...)
-AFreqs <- get_alle_freqs_from_slg_pipe(path = "slg_pipe/arena/COHO_FIRST_RUN/alle_freqs.txt") %>%
+AFreqs <- get_steelhead_alle_freqs_from_slg_pipe(path = "slg_pipe/arena/STEELHEAD_FIRST_RUN/alle_freqs.txt") %>%
   left_join(., eff_sizes) %>%
-  mutate(eff_counts = ifelse(Year == "a", freq * eff_num_gc, round(freq * eff_num_gc))) %>%
+  mutate(eff_counts = ifelse(Year == "A", freq * eff_num_gc, round(freq * eff_num_gc))) %>%
   group_by(Pop, Year, Locus) %>%
   mutate(eff_sum = sum(eff_counts),
-         eff_counts_even = ifelse(Year == "b" & eff_sum %% 2 == 1, 
+         eff_counts_even = ifelse(Year == "B" & eff_sum %% 2 == 1, 
                                   eff_counts + rmultinom(1, 1, prob = eff_counts)[,1],  # we always add one to make it even.  Otherwise we get loci in which the sample size goes to zero.
                                   eff_counts)) %>%
   mutate(eff_counts_str = ifelse(Year == "a", sprintf("%02f", eff_counts_even), sprintf("%d", as.integer(eff_counts_even)))) %>%
@@ -105,15 +108,15 @@ AFreqs3 <- anti_join(AFreqs2, toss_pop_loci)
 
 # now remove any existing CoNe input files and write new ones
 # then for reproducibility, set a seed (not really necessary cuz they are biallelic markers....)
-system("cd CoNe_area/arena; rm *.txt *.out;  echo 12345 678910 > cone_seeds")
+system("cd CoNe_area/steelhead_arena; rm *.txt *.out;  echo 12345 678910 > cone_seeds")
 
-dump <- write_cone_eff_count_files(AFreqs3, pathprefix = "CoNe_area/arena")
+dump <- write_cone_eff_count_files(AFreqs3, pathprefix = "CoNe_area/steelhead_arena")
 
 
 # now, we run all those pops through CoNe...
 pops <- sort(unique(AFreqs2$Pop))
 names(pops) <- pops
-CoNe_results_list <- lapply(pops, function(x) runCoNe(x))
+CoNe_results_list <- lapply(pops, function(x) runCoNe(x, arena_path = "CoNe_area/steelhead_arena/"))
 
 # now, find those that we drop because their sample sizes were too small:
 drop_pops <- names(CoNe_results_list)[sapply(CoNe_results_list, is.null)]
@@ -134,7 +137,22 @@ Ne_mles <- lapply(results, function(x) x$max_etc) %>%
   select(pop, LowerSuppLim, MLE, UpperSuppLim)
 
 
+
+
+#### Now, we also want to record the sample size and the inferred number of parents contributing to it ####
+inferred_num_parents <- lapply(paths, function(x) {
+  # do the straightforward and the BLUE estimator
+  ped <- read_best_config(file.path(x, "Colony-Run-1", "output.BestConfig"))
+  numpar <- length(unique(c(ped$pa, ped$ma)))
+  numoffs <- nrow(ped)
+  data_frame(inferred_num_parents = numpar, sample_size_n = numoffs)
+}) %>%
+ bind_rows(.id = "Collection")
+
+
+
 #### Write out the results files to send to Libby and Carlos ####
 dir.create("outputs")
-write_csv(eff_sizes, path = "outputs/effective_sample_sizes.csv")
-write_csv(Ne_mles, path = "outputs/temporal_method_ne_estimates.csv")
+write_csv(eff_sizes, path = "outputs/steelhead-effective_sample_sizes.csv")
+write_csv(Ne_mles, path = "outputs/steelhead-temporal_method_ne_estimates.csv")
+write_csv(inferred_num_parents, path = "outputs/steelhead-inferred_num_parents.csv")

@@ -28,7 +28,8 @@ dir.create(INP)
 #### Get the data prepared ####
 metageno <- read.csv("data/steelhead-meta-and-genos.csv.gz", stringsAsFactors = FALSE) %>%
   tbl_df() %>%
-  filter(!(str_detect(Duplicated_Sample_Flag, "omit")))
+  filter(!(str_detect(Duplicated_Sample_Flag, "omit"))) %>%
+  filter(!(str_detect(GENOTYPE_REMARKS, "omit")))
   
 
 ## Retain only the YOYs from 2001 ##
