@@ -1,8 +1,5 @@
-library(readr)
-library(dplyr)
-library(stringr)
+library(tidyverse)
 library(afblue)
-library(ggplot2)
 
 source("R/ccc-sonc-functions.R")
 
@@ -26,7 +23,7 @@ tmp <- lapply(paths, function(x) {
   
   bcped <- read_colony_best_config(path = file.path(x, "Colony-Run-1", "output.BestConfig"))
   samples <- bcped$id[!is.na(bcped$dad)]
-  if(length(samples) > 1) {
+  if (length(samples) > 1) {
     L <- matrix_L_from_pedigree(bcped, samples)
     weights <- weights_from_matrix_L(L)
   } else {
@@ -44,7 +41,7 @@ tmp <- lapply(paths, function(x) {
   
   bcped <- read_colony_best_config(path = file.path(x, "Permed-Run-1", "output.BestConfig"))
   samples <- bcped$id[!is.na(bcped$dad)]
-  if(length(samples) > 1) {
+  if (length(samples) > 1) {
     L <- matrix_L_from_pedigree(bcped, samples)
     weights <- weights_from_matrix_L(L)
   } else {
@@ -156,3 +153,28 @@ dir.create("outputs")
 write_csv(eff_sizes, path = "outputs/steelhead-effective_sample_sizes.csv")
 write_csv(Ne_mles, path = "outputs/steelhead-temporal_method_ne_estimates.csv")
 write_csv(inferred_num_parents, path = "outputs/steelhead-inferred_num_parents.csv")
+
+
+# now, while we are at it, let's make the inferred_num_parents easier
+# to interpret
+inf_num_wide <- inferred_num_parents %>%
+  filter(sample_size_n >= 20) %>%   # toss any collection with fewer than 20 indivs
+  mutate(year_letter = str_sub(Collection, nchar(Collection), nchar(Collection))) %>%
+  mutate(pop = str_sub(Collection, 1, nchar(Collection) - 1)) %>%
+  mutate(parents_per_sample = inferred_num_parents / sample_size_n) %>%
+  select(pop, year_letter, parents_per_sample) %>%
+  tidyr::spread(data = ., key = year_letter, value = parents_per_sample)
+
+g <- ggplot(inf_num_wide, aes(x = A)) +
+  geom_point(aes(y = B), colour = "red") +
+  geom_point(aes(y = C), colour = "blue") +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed") +
+  xlab("First Episode Inferred Num Parents / Sample Size") + 
+  ylab("Subsequent Episode Inferred Num Parents / Sample Size")
+
+ggsave(g, filename = "outputs/steelhead-num-parents-scatter.pdf")
+
+tmpA <- tmp %>% 
+  filter(year_letter == "A")
+tmpO <- tmp %>%
+  filter(year_letter != "A")

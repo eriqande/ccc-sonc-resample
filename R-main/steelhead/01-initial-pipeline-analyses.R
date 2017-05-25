@@ -10,7 +10,7 @@
 # JUST PASTE THEM INTO THE COMMAND LINE AND LET THEM RUN.  OTHERWISE THINGS WON'T BE DONE
 # WHEN R TRIES TO MOVE ON TO THE NEXT ITEM.
 
-library(dplyr)
+library(tidyverse)
 library(stringr)
 source("R/ccc-sonc-functions.R")
 
@@ -26,21 +26,41 @@ dir.create(INP)
 
 
 #### Get the data prepared ####
-metageno <- read.csv("data/steelhead-meta-and-genos.csv.gz", stringsAsFactors = FALSE) %>%
-  tbl_df() %>%
-  filter(!(str_detect(Duplicated_Sample_Flag, "omit"))) %>%
-  filter(!(str_detect(GENOTYPE_REMARKS, "omit")))
-  
+
+# There were 5 pairs of samples that were clearly duplicate genotypes.
+# Hence, first thing we do is read those in.  Our strategy will be to
+# toss out the IDs that occur in column `Sample 2`.
+matchy <- read_csv("data/steelhead-matching-genos-to-toss.csv", skip = 6)
+
+# also, we need to get brian spence's stream numbers associated back on there,
+# so, get a table of them
+sns <- read_csv("data/steelhead-stream-number-spence.csv")
+
+# read all the data in, then toss the 5 genotype matchers, and then 
+# filter things down so that we only keep those individuals that have an entry in
+# PopID_rev --- if they don't have that Libby deemed them unsuitable for downstream
+# analysis.
+metageno <- read_csv("data/steelhead-meta-and-genos.csv.gz", 
+                     col_types = cols(SAMPLE_ID = col_character())) %>%
+  filter(!(PopID_rev %in% matchy$`Sample 2`))  %>%   # toss the matchers
+  filter(!is.na(PopID_rev)) %>%
+  mutate(Pop = str_replace_all(PopID_rev, "[0-9]*", "")) %>%
+  left_join(., sns) %>%
+  select(NMFS_DNA_ID, GENOTYPE_NUMBER, STREAM_NUMBER_SPENCE, Pop, everything())
+
+
+
 
 ## Retain only the YOYs from 2001 ##
 # this involves filtering using stream-specific length criteria
-sz_grps <- suppressWarnings(prepare_sth_sizegrp_data())
+sz_grps <- suppressWarnings(prepare_sth_sizegrp_data()) %>%
+  filter(!is.na(STREAM_NUMBER_SPENCE))
 
 # the sz_grps file that brian gave me has some sort of redundant
 # columns.  We can get everything that we need from yoy_upper_mm and
 # one_plus_lower
 size_cats <- metageno %>%
-  select(STREAM_NUMBER_SPENCE, Pop_ID, Year, AGE, LENGTH) %>%
+  select(STREAM_NUMBER_SPENCE, PopID_rev, Year, AGE, LENGTH) %>%
   left_join(sz_grps %>% select(STREAM_NUMBER_SPENCE, yoy_upper_mm, one_plus_lower)) %>%
   mutate(age_category = ifelse(Year != "A",
                                ifelse(AGE == 0, "yoy", "one_plus"),
@@ -74,47 +94,39 @@ compare_it <- size_cats %>%
 
 write.csv(compare_it, "outputs/compare-age-category-nums.csv")
 
-### HAVE GOTTA PICK OUT THE YOY's and PROCEED NOW!!
+# now we pick out he yoys and proceed! #
+# this is a good job for a semi-join
+yoy_metageno <- size_cats %>%
+  filter(age_category == "yoy") %>%
+  semi_join(metageno, ., by = "PopID_rev")
+
 
 #####################################
-# be warned that there is a column at the end of all the genos giving the amount of 
-# missing data there.  That is easily removed below.
 
-# get just the genotypes we want and the IDs
-genos <- metageno %>%
-  select(Pop_ID:SH112876.45.1) %>%
-  select(-Sample_ID, -SexID, -SexID.1)
+# get just the genotypes we want and the IDs and toss the sex-locus
+genos <- yoy_metageno %>%
+  select(PopID_rev,Omy_AldA:`SH131965-120_1`) %>%
+  select(-SexID, -SexID_1) %>%
+  rename(Pop_ID = PopID_rev)
 
-# turns out that we are going to want to toss out some individuals that
-# have a lot of missing data.  Because we are going to be tossing out 
-# some apparent siblings.  It is important to have fairly complete genotypes.
+# we might want to toss out some individuals that
+# have a lot of missing data.  Libby apparently tossed most of them, but let
+# confirm thta here. It is important to have fairly complete genotypes.
 
-# it looks like three of the loci are untyped in everyone, too.  So lets quickly
-# take care of that:
+# we also look for loci that are untyped in many individuals...
 geno_mat <- as.matrix(genos[, -1])
 rownames(geno_mat) <- genos$Pop_ID
 
 # find untyped loci
 loc_type_counts <- colSums(geno_mat != 0)
-toss_these_locus_columns <- names(loc_type_counts)[loc_type_counts == 0]
+range(loc_type_counts)  # this is OK
 
-# now, let's also toss anyone that has more than 10 loci missing 
-# (in addition to the two that are missing in everyone).  So, that
-# translates to more than 24 0's in a row
+# now, let's check for missing data at individuals.
 twice_num_missing_loci <- rowSums(geno_mat == 0)
-keep_these_individuals <- names(twice_num_missing_loci)[twice_num_missing_loci < 24]
+range(twice_num_missing_loci)  # great. anyone with 10 or more missing loci has been tossed.
 
-# that will toss about 500 indivs
-
-# and now we filter the individuals
-genos <- genos %>%
-  filter(Pop_ID %in% keep_these_individuals)
-
-# and then toss out the loci that we don't want
-genos <- genos[, !(names(genos) %in% toss_these_locus_columns)]
-
+# now, get ready to make an slg_pipe file out of it
 names(genos)[1] <- ""  # that first column has be to empty
-
 
 # now make sure that the locus name is the same in each column
 slg_genos <- genos
@@ -158,8 +170,11 @@ system(paste("cd slg_pipe/arena;",
 message("Launching colony runs")
 system("cd slg_pipe/arena/STEELHEAD_FIRST_RUN/ColonyArea; ./script/RunAllColony.sh  Colony-Run-1   0  20  &")
 
-# I didn't do the following yet
-#system("cd slg_pipe/arena/STEELHEAD_FIRST_RUN/ColonyArea; ./script/RunAllColony.sh  Permed-Run-1   1  20  &")
+# after that, it might worth cleaning up some of the output files...
+# rm */Colony-Run-1/{output.ConfigArchive,output.MidResult*,output.OffGenotype}  etc....
+
+# also run the permed ones
+system("cd slg_pipe/arena/STEELHEAD_FIRST_RUN/ColonyArea; ./script/RunAllColony.sh  Permed-Run-1   1  20  &")
 
 
 
