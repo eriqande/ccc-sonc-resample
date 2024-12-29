@@ -2,12 +2,9 @@
 .Rhistory
 .RData
 .Ruserdata
-
 # ignore excel's stupid files when it opens a spreadsheet
 data/~$*
-
 .DS_Store
-
 # ignore the repo that we will stick in here for analysis
 slg_pipe
-
+201-colony-summarize.nb.html

@@ -35,3 +35,10 @@ All the data are in the `./data` directory.
 
 
 
+## Slurping the Colony Results
+
+For extending this study using whole genome sequencing, we want to pick samples
+that might not be full siblings of one another from each sample.  So I post-process
+the Colony results using `./201-colony-summarize.Rmd`.
+
+

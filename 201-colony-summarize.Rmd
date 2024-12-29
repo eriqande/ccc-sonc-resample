@@ -1,0 +1,153 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+
+The goal here is to get the Colony-identified full-sib clusters from the results
+and associate them with their NMFS ids.
+
+```{r}
+library(tidyverse)
+library(readxl)
+
+dir.create("results/201", recursive = TRUE, showWarnings = FALSE)
+```
+
+The results can be obtained like this:
+```{r}
+sh_files <- list.files(
+  path = "slg_pipe/arena/STEELHEAD_FIRST_RUN/ColonyArea/Collections",
+  pattern = "output.BestFSFamily",
+  recursive = TRUE,
+  full.names = TRUE
+)
+sh_files <- sh_files[str_detect(sh_files, "Colony-Run-1")]
+
+coho_files <- list.files(
+  path = "slg_pipe/arena/COHO_FIRST_RUN/ColonyArea/Collections",
+  pattern = "output.BestFSFamily",
+  recursive = TRUE,
+  full.names = TRUE
+)
+coho_files <- coho_files[str_detect(coho_files, "Colony-Run-1")]
+```
+
+
+Now, we can read them all into one enormous tibble:
+```{r}
+big_tib <- lapply(c(sh_files, coho_files), function(x) {
+  read_table(
+    x, 
+    progress = FALSE, 
+    col_types = "iddc", 
+    na = c("", "NaN", "NA"),
+    col_names = c("fs_prob_index", "prob_inc", "prob_exc", "members"),
+    skip = 1,
+  ) %>% mutate(path = x, .before = fs_prob_index)
+}) %>% bind_rows()
+```
+
+Now we can parse the path column into species, collection, and episode:
+```{r}
+bt2 <- big_tib %>% 
+  extract(
+    path,
+    into = c("species", "collection", "episode"),
+    regex = "slg_pipe/arena/(.*)_FIRST_RUN/ColonyArea/Collections/(.+)(.)/Colony-Run-1/output",
+    remove = FALSE
+  )
+
+```
+
+
+Then count up the number of individuals in each sibship and sort by sibship size and
+index them that way, then split them up and unnest them!
+```{r}
+bt3 <- bt2 %>%
+  mutate(
+    sibship_size = str_count(members, ",") + 1L,
+    members_list = map(members, function(x) member = str_split(x, ",")[[1]])
+  ) %>%
+  arrange(species, collection, episode, desc(sibship_size)) %>%
+  group_by(species, collection, episode) %>%
+  mutate(fs_size_index = 1:n(), .before = sibship_size) %>%
+  ungroup() %>%
+  select(-members) %>%
+  unnest(cols = members_list) %>%
+  rename(member = members_list)
+   
+
+```
+
+The number of fish in this file is the same as the number of lines in the geno files
+(for steelhead and coho) minus 2 (for the header lines):
+```{r}
+nrow(bt3)
+
+message("")
+message("Now, how many in the geno files?")
+system("wc slg_pipe/arena/steelhead-inputs/steelhead-first-run-genos.txt slg_pipe/arena/coho-inputs/coho-first-run-genos.txt")
+```
+
+Last thing we need to do is put the meta data on there.  We can grab the meta data from the meta genos.
+```{r}
+sh_meta <- read_csv("data/steelhead-meta-and-genos.csv.gz") %>%
+  rename(NMFS_DNA_ID = NMFS_DNA_ID...1) %>%
+  select(NMFS_DNA_ID:Sample_ID)
+
+
+# quickly check to make sure that the PopID_rev is unique across individuals
+sh_meta %>%
+  count(PopID_rev) %>%
+  arrange(desc(n)) %>%
+  head()
+```
+
+That looks good.  Let's do the same with coho:
+```{r}
+coho_meta <- read_excel(
+  "data/coho_coastw_2003_2015_genotypes.xlsx", 
+  sheet = 1, 
+  col_types = "text") %>%
+  mutate(
+    NMFS_DNA_ID =  NMFSRepID, .before = Sorter
+  ) %>%
+  select(NMFS_DNA_ID:Cross_Ref)
+
+
+# quickly check to make sure that the PopID is unique across individuals
+coho_meta %>%
+  count(Pop_ID) %>%
+  arrange(desc(n)) %>% 
+  slice(1:20)
+```
+
+That looks great!
+
+
+Let's attach this to the sibs info.  We do that separately for coho and SH
+because the meta data column names are not consistent.
+```{r}
+sh_sibs <- bt3 %>%
+  filter(species == "STEELHEAD") %>%
+  left_join(sh_meta, by = join_by(member == PopID_rev))
+
+coho_sibs <- bt3 %>%
+  filter(species == "COHO") %>%
+  left_join(coho_meta, by = join_by(member == Pop_ID))
+
+```
+
+
+And then write that stuff out!
+```{r}
+write_csv(sh_sibs, file = "results/201/resample-project-steelhead-sib-groups.csv.gz")
+write_csv(coho_sibs, file = "results/201/resample-project-coho-sib-groups.csv.gz")
+```
+
+
+
+
+
